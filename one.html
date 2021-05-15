@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>three.js webgl - interactive - voxel painter</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<style>
+			body {
+				background-color: #f0f0f0;
+				color: #444;
+			}
+			a {
+				color: #08f;
+			}
+		</style>
+	</head>
+	<body>
+
+    <script src="https://unpkg.com/stats.js@0.17.0/build/stats.min.js"></script>
+    <script src="https://unpkg.com/three@0.122.0/build/three.js"></script>
+
+     <!-- include threex.artoolkit -->
+     <script src="threex/threex-artoolkitsource.js"></script>
+     <script src="threex/threex-artoolkitcontext.js"></script>
+     <script src="threex/threex-arbasecontrols.js"></script>
+     <script src="threex/threex-armarkercontrols.js"></script>
+       <!-- include jsartookit -->
+    <script src="jsartoolkit5/artoolkit.min.js"></script>
+    <script src="jsartoolkit5/artoolkit.api.js"></script>
+
+
+		<script type="module">
+
+			import * as THREE from "/threex/three.module.js";
+
+			let camera, scene, renderer;
+			let plane;
+			let pointer, raycaster, isShiftDown = false;
+      var arToolkitSource, arToolkitContext;
+      var markerRoot1, clock, deltaTime, totalTime;
+
+			let rollOverMesh, rollOverMaterial;
+			let cubeGeo, cubeMaterial;
+
+			const objects = [];
+
+			init();
+			render();
+
+			function init() {
+
+				camera = new THREE.PerspectiveCamera( 45, window.innerWidth / window.innerHeight, 1, 10000 );
+				camera.position.set( 500, 800, 1300 );
+				camera.lookAt( 0, 0, 0 );
+
+				scene = new THREE.Scene();
+				//scene.background = new THREE.Color( 0xf0f0f0 );
+        clock = new THREE.Clock();
+        deltaTime = 0;
+        totalTime = 0;
+
+        ////////////////////////////////////////////////////////////
+        // setup arToolkitSource
+        ////////////////////////////////////////////////////////////
+
+        arToolkitSource = new THREEx.ArToolkitSource({
+          sourceType: "webcam"
+        });
+
+        function onResize() {
+          arToolkitSource.onResize();
+          arToolkitSource.copySizeTo(renderer.domElement);
+          if (arToolkitContext.arController !== null) {
+            arToolkitSource.copySizeTo(arToolkitContext.arController.canvas);
+          }
+        }
+
+        arToolkitSource.init(function onReady() {
+          onResize();
+        });
+
+        // handle resize event
+        window.addEventListener("resize", function() {
+          onResize();
+        });
+
+        ////////////////////////////////////////////////////////////
+        // setup arToolkitContext
+        ////////////////////////////////////////////////////////////
+
+        // create atToolkitContext
+        arToolkitContext = new THREEx.ArToolkitContext({
+          cameraParametersUrl: "data/camera_para.dat",
+          detectionMode: "mono"
+        });
+
+        // copy projection matrix to camera when initialization complete
+        arToolkitContext.init(function onCompleted() {
+          camera.projectionMatrix.copy(arToolkitContext.getProjectionMatrix());
+        });
+
+        ////////////////////////////////////////////////////////////
+        // setup markerRoots
+        ////////////////////////////////////////////////////////////
+
+        // build markerControls
+        markerRoot1 = new THREE.Group();
+        scene.add(markerRoot1);
+        let markerControls1 = new THREEx.ArMarkerControls(
+          arToolkitContext,
+          markerRoot1,
+          {
+            type: "pattern",
+            patternUrl: "data/hiro.patt"
+          }
+        );
+
+				// roll-over helpers
+
+				const rollOverGeo = new THREE.BoxGeometry( 50, 50, 50 );
+				rollOverMaterial = new THREE.MeshBasicMaterial( { color: 0xff0000, opacity: 0.5, transparent: true } );
+				rollOverMesh = new THREE.Mesh( rollOverGeo, rollOverMaterial );
+				markerRoot1.add( rollOverMesh );
+
+				// cubes
+
+				cubeGeo = new THREE.BoxGeometry( 50, 50, 50 );
+				cubeMaterial = new THREE.MeshLambertMaterial( { color: 0xfeb74c, map: new THREE.TextureLoader().load( 'textures/sqaure-outlinee-textured.png' ) } );
+
+				// grid
+
+				const gridHelper = new THREE.GridHelper( 1000, 20 );
+				markerRoot1.add( gridHelper );
+
+				//
+
+				raycaster = new THREE.Raycaster();
+				pointer = new THREE.Vector2();
+
+				const geometry = new THREE.PlaneGeometry( 1000, 1000 );
+				geometry.rotateX( - Math.PI / 2 );
+
+				plane = new THREE.Mesh( geometry, new THREE.MeshBasicMaterial( { visible: false } ) );
+				markerRoot1.add( plane );
+
+				objects.push( plane );
+
+				// lights
+
+				const ambientLight = new THREE.AmbientLight( 0x606060 );
+				scene.add( ambientLight );
+
+				const directionalLight = new THREE.DirectionalLight( 0xffffff );
+				directionalLight.position.set( 1, 0.75, 0.5 ).normalize();
+				scene.add( directionalLight );
+
+				renderer = new THREE.WebGLRenderer( { alpha: true, antialias: true } );
+				renderer.setPixelRatio( window.devicePixelRatio );
+				renderer.setSize( window.innerWidth, window.innerHeight );
+				document.body.appendChild( renderer.domElement );
+        // renderer.setClearColor(new THREE.Color("lightgrey"), 0);
+        // renderer.setSize(640, 480);
+        // renderer.domElement.style.position = "absolute";
+        // renderer.domElement.style.top = "0px";
+        // renderer.domElement.style.left = "0px";
+        // document.body.appendChild(renderer.domElement);
+
+
+				document.addEventListener( 'pointermove', onPointerMove );
+				document.addEventListener( 'pointerdown', onPointerDown );
+				document.addEventListener( 'keydown', onDocumentKeyDown );
+				document.addEventListener( 'keyup', onDocumentKeyUp );
+
+				//
+
+				window.addEventListener( 'resize', onWindowResize );
+
+			}
+
+			function onWindowResize() {
+
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+
+				renderer.setSize( window.innerWidth, window.innerHeight );
+
+			}
+
+			function onPointerMove( event ) {
+
+				pointer.set( ( event.clientX / window.innerWidth ) * 2 - 1, - ( event.clientY / window.innerHeight ) * 2 + 1 );
+
+				raycaster.setFromCamera( pointer, camera );
+
+				const intersects = raycaster.intersectObjects( objects );
+
+				if ( intersects.length > 0 ) {
+
+					const intersect = intersects[ 0 ];
+
+					rollOverMesh.position.copy( intersect.point ).add( intersect.face.normal );
+					rollOverMesh.position.divideScalar( 50 ).floor().multiplyScalar( 50 ).addScalar( 25 );
+
+				}
+
+				render();
+
+			}
+
+			function onPointerDown( event ) {
+
+				pointer.set( ( event.clientX / window.innerWidth ) * 2 - 1, - ( event.clientY / window.innerHeight ) * 2 + 1 );
+
+				raycaster.setFromCamera( pointer, camera );
+
+				const intersects = raycaster.intersectObjects( objects );
+
+				if ( intersects.length > 0 ) {
+
+					const intersect = intersects[ 0 ];
+
+					// delete cube
+
+					if ( isShiftDown ) {
+
+						if ( intersect.object !== plane ) {
+
+							markerRoot1.remove( intersect.object );
+
+							objects.splice( objects.indexOf( intersect.object ), 1 );
+
+						}
+
+						// create cube
+
+					} else {
+
+						const voxel = new THREE.Mesh( cubeGeo, cubeMaterial );
+						voxel.position.copy( intersect.point ).add( intersect.face.normal );
+						voxel.position.divideScalar( 50 ).floor().multiplyScalar( 50 ).addScalar( 25 );
+						markerRoot1.add( voxel );
+
+						objects.push( voxel );
+
+					}
+
+					render();
+
+				}
+
+			}
+
+			function onDocumentKeyDown( event ) {
+
+				switch ( event.keyCode ) {
+
+					case 16: isShiftDown = true; break;
+
+				}
+
+			}
+
+			function onDocumentKeyUp( event ) {
+
+				switch ( event.keyCode ) {
+
+					case 16: isShiftDown = false; break;
+
+				}
+
+			}
+
+			function render() {
+
+				renderer.render( scene, camera );
+
+			}
+
+		</script>
+
+	</body>
+</html>
